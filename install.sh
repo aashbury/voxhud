@@ -3,7 +3,7 @@
 # loop (edit here, run this, the shell hot-reloads).
 #
 # What it changes, and what uninstall.sh puts back:
-#   ~/.config/omarchy/plugins/voxhud/     the plugin (copied from this repo)
+#   ~/.config/omarchy/plugins/io.github.aashbury.voxhud/   the plugin
 #   ~/.config/omarchy/shell.json          voxhud widget added; Omarchy's own
 #                                         Dictation indicator hidden
 #   ~/.config/voxtype/config.toml         osd.enabled = false (voxtype's overlay)
@@ -13,7 +13,7 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
-PLUGIN_ID="voxhud"
+PLUGIN_ID="io.github.aashbury.voxhud"
 PLUGINS_DIR="$HOME/.config/omarchy/plugins"
 TARGET="$PLUGINS_DIR/$PLUGIN_ID"
 SHELL_JSON="$HOME/.config/omarchy/shell.json"
@@ -50,20 +50,27 @@ if command -v omarchy >/dev/null; then
 fi
 
 mkdir -p "$PLUGINS_DIR" "$STATE_DIR"
-# The shell reloads the plugin on every file event under its folder, so stage
-# the copy in a dot-directory (which the watcher ignores) and swap it in with
-# two renames: one reload instead of one per file.
-STAGE="$PLUGINS_DIR/.$PLUGIN_ID.staging"
-OLD="$PLUGINS_DIR/.$PLUGIN_ID.old"
-rm -rf "$STAGE" "$OLD"
-rsync -a \
-  --exclude .git --exclude .gitignore --exclude tests --exclude '*.md' \
-  "$REPO/" "$STAGE/"
-chmod +x "$STAGE/bin/voxhud" "$STAGE/install.sh" "$STAGE/uninstall.sh"
-[[ -d $TARGET ]] && mv "$TARGET" "$OLD"
-mv "$STAGE" "$TARGET"
-rm -rf "$OLD"
-ok "plugin copied to ${TARGET/#$HOME/\~}"
+if [[ $REPO == "$TARGET" ]]; then
+  # Already the installed copy — `omarchy plugin add` cloned it here, and this
+  # script is only doing the parts a plugin install is not allowed to do.
+  chmod +x "$TARGET/bin/voxhud" "$TARGET/bin/voxhud-levels" "$TARGET/uninstall.sh"
+  ok "running from the installed plugin"
+else
+  # The shell reloads the plugin on every file event under its folder, so stage
+  # the copy in a dot-directory (which the watcher ignores) and swap it in with
+  # two renames: one reload instead of one per file.
+  STAGE="$PLUGINS_DIR/.$PLUGIN_ID.staging"
+  OLD="$PLUGINS_DIR/.$PLUGIN_ID.old"
+  rm -rf "$STAGE" "$OLD"
+  rsync -a \
+    --exclude .git --exclude .gitignore --exclude tests --exclude '*.md' --exclude 'preview.*' \
+    "$REPO/" "$STAGE/"
+  chmod +x "$STAGE/bin/voxhud" "$STAGE/bin/voxhud-levels" "$STAGE/install.sh" "$STAGE/uninstall.sh"
+  [[ -d $TARGET ]] && mv "$TARGET" "$OLD"
+  mv "$STAGE" "$TARGET"
+  rm -rf "$OLD"
+  ok "plugin copied to ${TARGET/#$HOME/\~}"
+fi
 
 shell_ipc shell rescanPlugins >/dev/null 2>&1 || true
 for _ in $(seq 1 25); do

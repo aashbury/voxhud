@@ -18,7 +18,7 @@ Item {
   property var service: null
 
   readonly property var svc: service ? service
-    : (shell && typeof shell.serviceFor === "function" ? shell.serviceFor("voxhud") : null)
+    : (shell && typeof shell.serviceFor === "function" ? shell.serviceFor("io.github.aashbury.voxhud") : null)
 
   // Host contract. `omarchy-shell shell summon voxhud '{"demo":"tour"}'`
   // previews the HUD; a bare summon runs the tour.

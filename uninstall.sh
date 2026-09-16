@@ -3,7 +3,7 @@
 
 set -uo pipefail
 
-PLUGIN_ID="voxhud"
+PLUGIN_ID="io.github.aashbury.voxhud"
 TARGET="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 SHELL_JSON="$HOME/.config/omarchy/shell.json"
 STATE_DIR="$HOME/.local/state/voxhud"

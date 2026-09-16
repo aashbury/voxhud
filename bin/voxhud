@@ -8,7 +8,7 @@ set -uo pipefail
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 PLUGIN_DIR=$(cd "$(dirname "$SELF")/.." && pwd)
-PLUGIN_ID="voxhud"
+PLUGIN_ID="io.github.aashbury.voxhud"
 VOXTYPE_CONFIG="$HOME/.config/voxtype/config.toml"
 SHELL_JSON="$HOME/.config/omarchy/shell.json"
 STATE_DIR="$HOME/.local/state/voxhud"

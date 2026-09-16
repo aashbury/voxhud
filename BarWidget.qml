@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import Quickshell
 import qs.Commons
 import qs.Ui
 import "popup"
@@ -8,11 +7,13 @@ import "popup"
 // The bar icon that never disappears, plus the popup that holds the dictionary.
 Panel {
   id: root
-  moduleName: "voxhud"
+  // The bar matches a slot to its shell.json entry by moduleName, so this is
+  // the plugin id, not the CLI name.
+  moduleName: "io.github.aashbury.voxhud"
   manageIpc: false
 
   readonly property var svc: bar && bar.shell && typeof bar.shell.serviceFor === "function"
-    ? bar.shell.serviceFor("voxhud") : null
+    ? bar.shell.serviceFor("io.github.aashbury.voxhud") : null
   readonly property color foreground: bar ? bar.barForeground : Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property string phase: svc ? svc.phase : "idle"

@@ -90,7 +90,8 @@ Column {
     mutateProc.running = true
   }
 
-  function add() {
+  // Not `add()`: Column already has an `add` transition property.
+  function addReplacement() {
     var from = fromField.text.trim().toLowerCase()
     var to = toField.text.trim()
     var problem = M.validateFrom(from)
@@ -139,7 +140,8 @@ Column {
 
   function setSetting(key, value) {
     var registry = svc && svc.shell ? svc.shell.pluginRegistry : null
-    if (registry && typeof registry.setBarWidget === "function") registry.setBarWidget("voxhud", key, value)
+    if (registry && typeof registry.setBarWidget === "function")
+      registry.setBarWidget("io.github.aashbury.voxhud", key, value)
   }
 
   Process {
@@ -154,7 +156,7 @@ Column {
     id: mutateProc
     property var pendingDone: null
     stderr: StdioCollector { id: mutateErr }
-    onExited: function(code, status) {
+    onExited: function(code) {
       body.busy = false
       var done = pendingDone
       pendingDone = null
@@ -389,7 +391,7 @@ Column {
         placeholderText: "typed as"
         foreground: body.foreground
         enabled: !body.busy
-        onAccepted: body.add()
+        onAccepted: body.addReplacement()
       }
 
       Button {
@@ -400,7 +402,7 @@ Column {
         foreground: body.foreground
         fontFamily: body.fontFamily
         enabled: !body.busy
-        onClicked: body.add()
+        onClicked: body.addReplacement()
       }
     }
 

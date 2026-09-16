@@ -26,7 +26,7 @@ Item {
   // Settings live on the widget's inline shell.json entry; the shell only hands
   // them to bar widgets, so the service reads the config directly. Re-evaluates
   // whenever shell.json changes.
-  readonly property var cfg: M.mergeSettings(M.findEntry(shell ? shell.shellConfig : null, "voxhud"))
+  readonly property var cfg: M.mergeSettings(M.findEntry(shell ? shell.shellConfig : null, "io.github.aashbury.voxhud"))
   readonly property bool hudEnabled: cfg.hudEnabled === true
   readonly property string position: String(cfg.position)
   readonly property string meter: String(cfg.meter)
@@ -501,7 +501,7 @@ Item {
     function popup(): string {
       var bar = service.shell ? service.shell.bar : null
       if (!bar || typeof bar.summonBarWidget !== "function") return "no-bar"
-      return bar.summonBarWidget("voxhud") ? "ok" : "no-widget"
+      return bar.summonBarWidget("io.github.aashbury.voxhud") ? "ok" : "no-widget"
     }
     function recent(): string { return JSON.stringify(service.recent) }
     function copy(index: string): string {
