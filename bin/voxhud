@@ -1,0 +1,194 @@
+#!/bin/bash
+# voxhud - a HUD for Voxtype dictation on Omarchy.
+#
+# Everything here is read-only against the running shell except `dictionary`,
+# which writes through `voxtype config set/unset`, and `restart`.
+
+set -uo pipefail
+
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+PLUGIN_DIR=$(cd "$(dirname "$SELF")/.." && pwd)
+PLUGIN_ID="voxhud"
+VOXTYPE_CONFIG="$HOME/.config/voxtype/config.toml"
+SHELL_JSON="$HOME/.config/omarchy/shell.json"
+STATE_DIR="$HOME/.local/state/voxhud"
+
+shell_ipc() {
+  if command -v omarchy-shell >/dev/null 2>&1; then omarchy-shell "$@"
+  else "${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-shell" "$@"
+  fi
+}
+
+usage() {
+  cat <<USAGE
+Usage: voxhud <command> [args]
+
+  status                          What the HUD service sees (JSON)
+  demo <state>                    Preview the HUD without speaking:
+                                  recording | processing | done | cancelled | tour | off
+  cancel                          Discard the current recording, insert nothing
+  popup                           Open the dictionary popup under the bar icon
+  recent [--json]                 The last three takes (in memory only)
+  copy [1|2|3]                    Copy one of them to the clipboard (default 1)
+  dictionary list [--json]        Word replacements and vocabulary hints
+  dictionary add <heard> <typed>  Add a replacement (case-insensitive)
+  dictionary remove <heard>       Remove a replacement
+  dictionary prompt [get|set <text>|clear]
+                                  Vocabulary hints (whisper.initial_prompt)
+  restart                         Restart the Voxtype daemon (dictionary changes need it)
+  doctor                          Check the whole install
+  uninstall                       Remove voxhud and restore what it changed
+
+Hold F9 to dictate, release to insert. Super+Ctrl+X toggles.
+USAGE
+}
+
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
+bad()  { printf '  \033[31m✗\033[0m %s\n' "$*"; }
+die()  { bad "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------- dictionary
+
+dictionary_json() {
+  python3 - "$VOXTYPE_CONFIG" <<'PY'
+import json, sys, tomllib
+path = sys.argv[1]
+try:
+    with open(path, "rb") as f:
+        cfg = tomllib.load(f)
+except FileNotFoundError:
+    cfg = {}
+except Exception as e:
+    print(json.dumps({"error": str(e), "replacements": {}, "initial_prompt": ""}))
+    sys.exit(0)
+text = cfg.get("text", {}) if isinstance(cfg.get("text"), dict) else {}
+whisper = cfg.get("whisper", {}) if isinstance(cfg.get("whisper"), dict) else {}
+reps = text.get("replacements", {})
+if not isinstance(reps, dict):
+    reps = {}
+fillers = text.get("filler_words")
+if not isinstance(fillers, list):
+    fillers = None
+print(json.dumps({
+    "replacements": {str(k): str(v) for k, v in reps.items()},
+    "initial_prompt": str(whisper.get("initial_prompt") or ""),
+    "spoken_punctuation": bool(text.get("spoken_punctuation", False)),
+    "filter_filler_words": bool(text.get("filter_filler_words", True)),
+    "filler_words": [str(w) for w in fillers] if fillers is not None else None,
+}))
+PY
+}
+
+cmd_dictionary() {
+  local sub="${1:-list}"; shift || true
+  case "$sub" in
+    list)
+      if [[ "${1:-}" == "--json" ]]; then dictionary_json; return; fi
+      dictionary_json | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+reps = d.get("replacements", {})
+if not reps:
+    print("No replacements.")
+else:
+    width = max(len(k) for k in reps)
+    for k in sorted(reps):
+        print(f"  {k:<{width}}  ->  {reps[k]}")
+prompt = d.get("initial_prompt", "")
+print()
+print("Vocabulary hints:   " + (prompt if prompt else "(none)"))
+fill = d.get("filler_words") or ["uh", "um", "er", "ah", "eh", "hmm", "hm", "mm", "mhm"]
+print("Filler words:       " + ("dropped: " + ", ".join(fill) if d.get("filter_filler_words", True) else "kept"))
+print("Spoken punctuation: " + ("on" if d.get("spoken_punctuation") else "off"))
+'
+      ;;
+    add)
+      local from="${1:-}" to="${2:-}"
+      [[ -n $from && -n $to ]] || die "usage: voxhud dictionary add <heard> <typed>"
+      from=$(printf '%s' "$from" | tr '[:upper:]' '[:lower:]')
+      voxtype config set "text.replacements.$from" "$to" || exit $?
+      ok "$from -> $to  (restart Voxtype to use it: voxhud restart)"
+      ;;
+    remove|rm|delete)
+      local from="${1:-}"
+      [[ -n $from ]] || die "usage: voxhud dictionary remove <heard>"
+      from=$(printf '%s' "$from" | tr '[:upper:]' '[:lower:]')
+      voxtype config unset "text.replacements.$from" || exit $?
+      ok "removed $from  (restart Voxtype to apply: voxhud restart)"
+      ;;
+    prompt)
+      local action="${1:-get}"; shift || true
+      case "$action" in
+        get) dictionary_json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("initial_prompt",""))' ;;
+        set) [[ -n "${1:-}" ]] || die "usage: voxhud dictionary prompt set <text>"
+             voxtype config set whisper.initial_prompt "$*" && ok "hints saved (restart Voxtype to use them)" ;;
+        clear) voxtype config unset whisper.initial_prompt && ok "hints cleared" ;;
+        *) die "unknown prompt action: $action" ;;
+      esac
+      ;;
+    *) die "unknown dictionary command: $sub" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- doctor
+
+cmd_doctor() {
+  local fails=0
+  check() { if "$@" >/dev/null 2>&1; then return 0; else return 1; fi; }
+
+  if command -v voxtype >/dev/null; then ok "voxtype binary - $(command -v voxtype)"; else bad "voxtype not installed - run: omarchy voxtype install"; fails=$((fails+1)); fi
+  if systemctl --user is-active --quiet voxtype.service; then ok "voxtype.service active"; else bad "voxtype.service not active - systemctl --user start voxtype.service"; fails=$((fails+1)); fi
+  local rt="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  if [[ -f "$rt/voxtype/state" ]]; then ok "state file - $(cat "$rt/voxtype/state")"; else warn "no state file at $rt/voxtype/state (daemon not running yet?)"; fi
+  if [[ -S "$rt/voxtype/audio.sock" ]]; then ok "audio socket"; else warn "no audio socket at $rt/voxtype/audio.sock (levels will be flat)"; fi
+  if command -v voxtype-audio-bridge >/dev/null; then ok "voxtype-audio-bridge"; else bad "voxtype-audio-bridge missing"; fails=$((fails+1)); fi
+  if python3 -c 'import tomllib' 2>/dev/null; then ok "python3 tomllib"; else bad "python3 >= 3.11 needed for the dictionary"; fails=$((fails+1)); fi
+
+  if check shell_ipc shell ping; then ok "omarchy-shell reachable"; else bad "omarchy-shell not reachable"; fails=$((fails+1)); return $fails; fi
+  local plugins; plugins=$(shell_ipc shell listPlugins 2>/dev/null || echo '[]')
+  local entry; entry=$(printf '%s' "$plugins" | jq -c --arg id "$PLUGIN_ID" '.[] | select(.id==$id)' 2>/dev/null)
+  if [[ -n $entry ]]; then
+    if printf '%s' "$entry" | jq -e '.enabled == true' >/dev/null 2>&1; then ok "plugin installed and enabled"; else bad "plugin installed but not enabled - omarchy bar put voxhud --section center --index 0"; fails=$((fails+1)); fi
+  else bad "plugin not registered - run install.sh"; fails=$((fails+1)); fi
+  if [[ $(shell_ipc voxhud ping 2>/dev/null) == "ok" ]]; then ok "voxhud service answering"; else bad "voxhud service not answering (journalctl --user -t omarchy-shell -n 50)"; fails=$((fails+1)); fi
+
+  local osd; osd=$(voxtype config get osd.enabled 2>/dev/null | tr -d '[:space:]' | tail -c 5)
+  if [[ $osd == *false* ]]; then ok "voxtype's own OSD off"; else warn "voxtype's own OSD still on (two overlays) - voxtype config set osd.enabled false && voxhud restart"; fi
+
+  if [[ -f $SHELL_JSON ]]; then
+    local items; items=$(jq -c '[.bar.layout[]?[]? | select(type=="object" and .id=="omarchy.indicators")][0].items // null' "$SHELL_JSON" 2>/dev/null)
+    if [[ $items == "null" ]]; then warn "Omarchy's Dictation indicator still shown (it hides while processing)"; elif printf '%s' "$items" | grep -q Dictation; then warn "Omarchy's Dictation indicator still in the bar"; else ok "Omarchy's Dictation indicator hidden"; fi
+  fi
+
+  local binds; binds=$(shell_ipc voxhud state 2>/dev/null | jq -c '.binds // {}' 2>/dev/null)
+  if printf '%s' "$binds" | jq -e '.found == true' >/dev/null 2>&1; then
+    ok "dictation keys found - $(printf '%s' "$binds" | jq -r '[.start.label, .toggle.label] | map(select(. != null)) | join(", ")')"
+  else warn "no dictation bindings discovered (legend will be generic)"; fi
+
+  if [[ -L "$HOME/.local/bin/voxhud" ]]; then ok "voxhud on PATH"; else warn "~/.local/bin/voxhud missing - run install.sh"; fi
+
+  if (( fails == 0 )); then echo; echo "Ready. Hold F9 and talk. Try: voxhud demo tour"; else echo; echo "$fails check(s) failed."; fi
+  return $fails
+}
+
+# ---------------------------------------------------------------- main
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  status)     shell_ipc voxhud state | { if command -v jq >/dev/null; then jq .; else cat; fi; } ;;
+  demo)       [[ -n "${1:-}" ]] || die "usage: voxhud demo <recording|processing|done|cancelled|tour|off>"
+              shell_ipc voxhud demo "$1" >/dev/null ;;
+  cancel)     shell_ipc -q voxhud cancel; voxtype record cancel 2>/dev/null || true ;;
+  popup)      shell_ipc voxhud popup >/dev/null ;;
+  recent)     if [[ "${1:-}" == "--json" ]]; then shell_ipc voxhud recent
+              else shell_ipc voxhud recent | jq -r 'if length == 0 then "No takes yet." else to_entries[] | "\(.key + 1). \(.value.text)" end'; fi ;;
+  copy)       n="${1:-1}"; [[ $n =~ ^[1-3]$ ]] || die "usage: voxhud copy [1|2|3]"
+              [[ $(shell_ipc voxhud copy "$((n - 1))") == "ok" ]] && ok "copied take $n" || die "no take $n" ;;
+  dictionary|dict) cmd_dictionary "$@" ;;
+  restart)    systemctl --user restart voxtype.service && ok "voxtype restarted" ;;
+  doctor)     cmd_doctor ;;
+  uninstall)  exec "$PLUGIN_DIR/uninstall.sh" "$@" ;;
+  help|-h|--help) usage ;;
+  *)          usage >&2; exit 2 ;;
+esac

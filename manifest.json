@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "id": "voxhud",
+  "name": "Voxhud",
+  "version": "0.1.0",
+  "author": "aashbury",
+  "license": "MIT",
+  "description": "A minimalist, theme-aware HUD for Voxtype dictation: listening, processing, done - with the real keys to stop, a click to cancel, and your dictionary one click away in the bar.",
+  "kinds": ["service", "panel", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "panel": "Hud.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Voxhud",
+    "description": "Dictation status. Click for your dictionary; middle-click cancels a recording; right-click previews the HUD.",
+    "category": "Status",
+    "aliases": ["dictation", "voxtype", "voice", "microphone", "speech"],
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "hudEnabled": true,
+      "position": "bottom",
+      "meter": "line",
+      "brackets": false,
+      "showLegend": true,
+      "showTarget": true
+    },
+    "schema": [
+      {
+        "key": "hudEnabled",
+        "type": "boolean",
+        "label": "Show the HUD",
+        "description": "Draw the on-screen HUD while dictating. The bar icon keeps tracking state either way."
+      },
+      {
+        "key": "position",
+        "type": "enum",
+        "label": "HUD position",
+        "options": ["bottom", "top"]
+      },
+      {
+        "key": "meter",
+        "type": "enum",
+        "label": "Level meter",
+        "description": "A single waveform line, or a row of level bars.",
+        "options": ["line", "bars"]
+      },
+      {
+        "key": "brackets",
+        "type": "boolean",
+        "label": "Corner brackets",
+        "description": "Targeting-reticle corners around the card. Sharp-cornered themes only."
+      },
+      {
+        "key": "showLegend",
+        "type": "boolean",
+        "label": "Show key hints",
+        "description": "A muted line naming the real keys that stop and insert, read from your live Hyprland bindings."
+      },
+      {
+        "key": "showTarget",
+        "type": "boolean",
+        "label": "Show where the text is going",
+        "description": "While processing, name the focused window the text will be typed into."
+      }
+    ]
+  }
+}

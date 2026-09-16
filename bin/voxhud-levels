@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Mic level meter for the voxhud HUD.
+
+Reads 16 kHz mono PCM from PipeWire via `pw-record` and prints one JSON line
+per 16 ms frame: {"rms": 0.031, "peak": 0.084}. Both are 0..1 amplitudes.
+
+Voxtype's own level socket reports a slow, windowed rms that still carries
+the previous take at the start of a new one; this meter has no memory, so
+the bars answer the moment you speak. It runs only while the HUD is
+listening and takes pw-record down with it when stopped.
+"""
+
+import json
+import math
+import os
+import signal
+import struct
+import subprocess
+import sys
+
+RATE = 16000
+FRAME = 256  # samples per report: 16 ms at 16 kHz
+
+
+def main():
+    cmd = ["pw-record", "--format=s16", "--rate=%d" % RATE, "--channels=1", "--raw", "-"]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+    except FileNotFoundError:
+        sys.stderr.write("voxhud-levels: pw-record not found\n")
+        return 1
+
+    def stop(*_args):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGHUP, stop)
+
+    out = sys.stdout
+    fmt = "<%dh" % FRAME
+    scale = 32768.0
+    # pw-record's first buffers arrive before the stream is really flowing
+    # and can be filled with 0x8000; the constant-frame check below catches
+    # most of it, this skips the ragged edge.
+    warmup = 4  # frames, ~65 ms
+    try:
+        # Some builds ignore --raw and emit a WAV header; skip it if present.
+        head = proc.stdout.read(4)
+        if head == b"RIFF":
+            proc.stdout.read(40)
+            head = b""
+        pending = head
+        while True:
+            need = FRAME * 2 - len(pending)
+            chunk = proc.stdout.read(need) if need > 0 else b""
+            if need > 0 and not chunk:
+                break
+            buf = pending + chunk
+            pending = b""
+            if len(buf) < FRAME * 2:
+                break
+            xs = struct.unpack(fmt, buf)
+            if warmup > 0:
+                warmup -= 1
+                continue
+            if min(xs) == max(xs):
+                continue  # constant fill, not audio
+            # The input carries a large DC offset that takes about a second to
+            # settle after the stream opens (every sample negative, decaying).
+            # Measure the signal about the frame's mean so DC never counts as
+            # level and the bars answer from the first word.
+            mean = sum(xs) / FRAME
+            peak = max(abs(x - mean) for x in xs) / scale
+            rms = math.sqrt(sum((x - mean) * (x - mean) for x in xs) / FRAME) / scale
+            out.write(json.dumps({"rms": round(rms, 4), "peak": round(peak, 4)}) + "\n")
+            out.flush()
+    except (BrokenPipeError, KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+            proc.wait(timeout=1)
+        except Exception:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except Exception:
+                pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
