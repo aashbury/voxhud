@@ -63,7 +63,7 @@ else
   OLD="$PLUGINS_DIR/.$PLUGIN_ID.old"
   rm -rf "$STAGE" "$OLD"
   rsync -a \
-    --exclude .git --exclude .gitignore --exclude tests --exclude '*.md' --exclude 'preview.*' \
+    --exclude .git --exclude .gitignore --exclude tests --exclude '*.md' --exclude 'preview.*' --exclude 'popup.*' \
     "$REPO/" "$STAGE/"
   chmod +x "$STAGE/bin/voxhud" "$STAGE/bin/voxhud-levels" "$STAGE/install.sh" "$STAGE/uninstall.sh"
   [[ -d $TARGET ]] && mv "$TARGET" "$OLD"

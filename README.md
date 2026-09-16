@@ -5,7 +5,7 @@ Omarchy. Hold **F9**, talk, let go — and see LISTENING → PROCESSING → DONE
 your theme's colors, with the real keys that stop and insert written
 underneath, and a ✕ to cancel.
 
-![voxhud listening](preview.png)
+![The voxhud HUD listening, and the popup with the dictionary open](preview.png)
 
 Voxtype keeps doing everything it does now — the keybindings, the
 transcription and the typing are untouched. voxhud replaces the overlay and
@@ -111,6 +111,8 @@ recent` prints them; `voxhud copy 2` copies the second. The same log line is
 how an empty take shows as **NOTHING HEARD** rather than DONE.
 
 ## Dictionary
+
+<img src="popup.png" alt="The voxhud popup: recent takes, replacements, filler words, spoken punctuation and vocabulary hints" width="380">
 
 The popup's DICTIONARY section is everything Voxtype does to your words, read
 live from `~/.config/voxtype/config.toml` so you can see what's there before
