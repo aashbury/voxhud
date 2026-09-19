@@ -55,6 +55,24 @@ Column {
   property bool setupFailed: false
   property bool setupDone: false
   readonly property bool setupPending: loaded && voxtypeInstalled && osdEnabled
+  property bool setupDetails: false
+
+  // Progressive disclosure. The dictionary is a reference sheet, not a daily
+  // control, so it opens on request and a one-line summary stands in for it.
+  // Session-scoped on purpose: persisting it would write shell.json, and every
+  // write there reloads the bar and closes this popup.
+  property bool dictionaryOpen: false
+  readonly property int hintCount: {
+    var t = initialPrompt.trim()
+    if (t === "") return 0
+    return t.split(",").filter(function(x) { return x.trim() !== "" }).length
+  }
+  readonly property string dictionarySummary: [
+    replacements.length === 1 ? "1 replacement" : replacements.length + " replacements",
+    filterFillers ? "fillers dropped" : "fillers kept",
+    "punctuation " + (spokenPunctuation ? "on" : "off"),
+    hintCount === 0 ? "no hints" : (hintCount === 1 ? "1 hint" : hintCount + " hints")
+  ].join(" · ")
   readonly property string setupLog: Quickshell.env("HOME") + "/.local/state/voxhud/setup.log"
 
   // For the "2 min ago" labels; ticks only while the popup is open.
@@ -305,24 +323,55 @@ Column {
       Text {
         textFormat: Text.PlainText
         width: parent.width
-        text: "Voxtype's own overlay is still on, so you see two while you talk. "
-          + "This turns it off, hides Omarchy's stock dictation icon (it disappears "
-          + "mid-transcription) and puts the voxhud command on your PATH. "
-          + "uninstall.sh puts all three back."
+        text: "Voxtype's own overlay is still on, so you see two while you talk."
         color: body.dim
         font.family: body.fontFamily
         font.pixelSize: Style.font.caption
         wrapMode: Text.WordWrap
       }
 
-      Button {
-        text: body.settingUp ? "Setting up…" : "Finish setup"
-        bordered: true
-        foreground: Color.accent
-        fontFamily: body.fontFamily
-        fontSize: Style.font.bodySmall
-        enabled: !body.settingUp
-        onClicked: body.finishSetup()
+      Row {
+        width: parent.width
+        spacing: Style.space(10)
+
+        Button {
+          text: body.settingUp ? "Setting up…" : "Finish setup"
+          bordered: true
+          foreground: Color.accent
+          fontFamily: body.fontFamily
+          fontSize: Style.font.bodySmall
+          enabled: !body.settingUp
+          onClicked: body.finishSetup()
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          anchors.verticalCenter: parent.verticalCenter
+          text: (body.setupDetails ? "󰅀 " : "󰅂 ") + "What this changes"
+          color: body.dim
+          font.family: body.fontFamily
+          font.pixelSize: Style.font.caption
+
+          MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: body.setupDetails = !body.setupDetails
+          }
+        }
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        visible: body.setupDetails
+        width: parent.width
+        text: "Turns Voxtype's overlay off (the daemon restarts once).\n"
+          + "Hides Omarchy's stock dictation icon — it disappears mid-transcription.\n"
+          + "Puts the voxhud command on your PATH.\n"
+          + "uninstall.sh puts all three back."
+        color: body.dim
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
       }
 
       Text {
@@ -383,7 +432,7 @@ Column {
       ? "Setup finished — Voxtype's overlay is off and it has been restarted."
       : body.needsRestart
         ? "Voxtype reads its dictionary at start — restart it to use the changes."
-        : "HUD " + (body.svc && body.svc.hudEnabled ? "on" : "off") + " · ✕ on the HUD or middle-click the icon cancels a take"
+        : "✕ on the HUD or middle-click the icon cancels a take"
     color: body.setupDone || body.needsRestart ? Color.accent : body.dim
     font.family: body.fontFamily
     font.pixelSize: Style.font.caption
@@ -451,6 +500,28 @@ Column {
         fontFamily: body.fontFamily
       }
 
+      // The header row is the disclosure control; the chevron just says so.
+      MouseArea {
+        anchors.left: parent.left
+        anchors.right: expandButton.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        cursorShape: Qt.PointingHandCursor
+        onClicked: body.dictionaryOpen = !body.dictionaryOpen
+      }
+
+      PanelActionButton {
+        id: expandButton
+        anchors.right: openButton.left
+        anchors.rightMargin: Style.space(4)
+        anchors.verticalCenter: parent.verticalCenter
+        iconText: body.dictionaryOpen ? "󰅀" : "󰅂"
+        tooltipText: body.dictionaryOpen ? "Hide the dictionary" : "Show the dictionary"
+        foreground: body.foreground
+        fontFamily: body.fontFamily
+        onClicked: body.dictionaryOpen = !body.dictionaryOpen
+      }
+
       PanelActionButton {
         id: openButton
         anchors.right: parent.right
@@ -465,169 +536,182 @@ Column {
 
     Text {
       textFormat: Text.PlainText
+      visible: !body.dictionaryOpen
       width: parent.width
-      text: "Everything Voxtype does to your words, live from its config. The pencil opens the file."
+      text: body.loaded ? body.dictionarySummary : "Reading Voxtype's config…"
       color: body.dim
       font.family: body.fontFamily
       font.pixelSize: Style.font.caption
       wrapMode: Text.WordWrap
+
+      MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        onClicked: body.dictionaryOpen = true
+      }
     }
 
-    // -- replacements
-    Text {
-      textFormat: Text.PlainText
+    Column {
+      visible: body.dictionaryOpen
       width: parent.width
-      topPadding: Style.space(4)
-      text: "Replacements · " + body.replacements.length
-      color: body.foreground
-      font.family: body.fontFamily
-      font.pixelSize: Style.font.body
-      font.bold: true
-    }
+      spacing: Style.space(8)
 
-    Text {
-      textFormat: Text.PlainText
-      width: parent.width
-      text: (body.loaded && body.replacements.length === 0 ? "None yet. " : "") + "Hears the left side, types the right."
-      color: body.dim
-      font.family: body.fontFamily
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.WordWrap
-    }
-
-    Repeater {
-      model: body.replacements
-
-      ReplacementRow {
-        required property var modelData
+      // -- replacements
+      Text {
+        textFormat: Text.PlainText
         width: parent.width
-        from: modelData.from
-        to: modelData.to
+        topPadding: Style.space(4)
+        text: "Replacements · " + body.replacements.length
+        color: body.foreground
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        visible: body.loaded && body.replacements.length === 0
+        width: parent.width
+        text: "None yet."
+        color: body.dim
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Repeater {
+        model: body.replacements
+
+        ReplacementRow {
+          required property var modelData
+          width: parent.width
+          from: modelData.from
+          to: modelData.to
+          foreground: body.foreground
+          fontFamily: body.fontFamily
+          enabled: !body.busy
+          onRemoveRequested: body.remove(modelData.from)
+        }
+      }
+
+      Row {
+        id: addRow
+        width: parent.width
+        spacing: Style.space(6)
+
+        readonly property real fieldWidth: (width - spacing * 2 - addButton.implicitWidth) / 2
+
+        TextField {
+          id: fromField
+          width: addRow.fieldWidth
+          placeholderText: "heard as"
+          foreground: body.foreground
+          enabled: !body.busy
+          onAccepted: toField.forceActiveFocus()
+        }
+
+        TextField {
+          id: toField
+          width: addRow.fieldWidth
+          placeholderText: "typed as"
+          foreground: body.foreground
+          enabled: !body.busy
+          onAccepted: body.addReplacement()
+        }
+
+        Button {
+          id: addButton
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Add"
+          bordered: true
+          foreground: body.foreground
+          fontFamily: body.fontFamily
+          enabled: !body.busy
+          onClicked: body.addReplacement()
+        }
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        visible: body.error !== ""
+        width: parent.width
+        text: body.error
+        color: Color.urgent
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      // -- built-in processing
+      Toggle {
+        width: parent.width
+        label: "Drop filler words"
+        description: (body.fillerWords ? body.fillerWords : body.builtinFillers).join(", ")
+          + (body.fillerWords ? "" : "  (built-in list)")
+        checked: body.filterFillers
         foreground: body.foreground
         fontFamily: body.fontFamily
+        titleSize: Style.font.body
         enabled: !body.busy
-        onRemoveRequested: body.remove(modelData.from)
-      }
-    }
-
-    Row {
-      id: addRow
-      width: parent.width
-      spacing: Style.space(6)
-
-      readonly property real fieldWidth: (width - spacing * 2 - addButton.implicitWidth) / 2
-
-      TextField {
-        id: fromField
-        width: addRow.fieldWidth
-        placeholderText: "heard as"
-        foreground: body.foreground
-        enabled: !body.busy
-        onAccepted: toField.forceActiveFocus()
+        onClicked: body.setFlag("text.filter_filler_words", !body.filterFillers)
       }
 
-      TextField {
-        id: toField
-        width: addRow.fieldWidth
-        placeholderText: "typed as"
-        foreground: body.foreground
-        enabled: !body.busy
-        onAccepted: body.addReplacement()
-      }
-
-      Button {
-        id: addButton
-        anchors.verticalCenter: parent.verticalCenter
-        text: "Add"
-        bordered: true
+      Toggle {
+        width: parent.width
+        label: "Spoken punctuation"
+        description: "Say \"period\", \"comma\", \"new line\" and get the character."
+        checked: body.spokenPunctuation
         foreground: body.foreground
         fontFamily: body.fontFamily
+        titleSize: Style.font.body
         enabled: !body.busy
-        onClicked: body.addReplacement()
-      }
-    }
-
-    Text {
-      textFormat: Text.PlainText
-      visible: body.error !== ""
-      width: parent.width
-      text: body.error
-      color: Color.urgent
-      font.family: body.fontFamily
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.WordWrap
-    }
-
-    // -- built-in processing
-    Toggle {
-      width: parent.width
-      label: "Drop filler words"
-      description: (body.fillerWords ? body.fillerWords : body.builtinFillers).join(", ")
-        + (body.fillerWords ? "" : "  (built-in list)")
-      checked: body.filterFillers
-      foreground: body.foreground
-      fontFamily: body.fontFamily
-      titleSize: Style.font.body
-      enabled: !body.busy
-      onClicked: body.setFlag("text.filter_filler_words", !body.filterFillers)
-    }
-
-    Toggle {
-      width: parent.width
-      label: "Spoken punctuation"
-      description: "Say \"period\", \"comma\", \"new line\" and get the character."
-      checked: body.spokenPunctuation
-      foreground: body.foreground
-      fontFamily: body.fontFamily
-      titleSize: Style.font.body
-      enabled: !body.busy
-      onClicked: body.setFlag("text.spoken_punctuation", !body.spokenPunctuation)
-    }
-
-    // -- vocabulary hints
-    Text {
-      textFormat: Text.PlainText
-      width: parent.width
-      topPadding: Style.space(4)
-      text: "Vocabulary hints"
-      color: body.foreground
-      font.family: body.fontFamily
-      font.pixelSize: Style.font.body
-      font.bold: true
-    }
-
-    Text {
-      textFormat: Text.PlainText
-      width: parent.width
-      text: "Names and jargon Whisper should expect, comma separated. A nudge, not a rule."
-      color: body.dim
-      font.family: body.fontFamily
-      font.pixelSize: Style.font.caption
-      wrapMode: Text.WordWrap
-    }
-
-    Row {
-      width: parent.width
-      spacing: Style.space(6)
-
-      TextField {
-        id: promptField
-        width: parent.width - parent.spacing - saveButton.implicitWidth
-        placeholderText: "Omarchy, Hyprland, Voxtype…"
-        foreground: body.foreground
-        enabled: !body.busy
-        onAccepted: body.savePrompt()
+        onClicked: body.setFlag("text.spoken_punctuation", !body.spokenPunctuation)
       }
 
-      Button {
-        id: saveButton
-        anchors.verticalCenter: parent.verticalCenter
-        text: "Save"
-        bordered: true
-        foreground: body.foreground
-        fontFamily: body.fontFamily
-        enabled: !body.busy && promptField.text.trim() !== body.initialPrompt
-        onClicked: body.savePrompt()
+      // -- vocabulary hints
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        topPadding: Style.space(4)
+        text: "Vocabulary hints"
+        color: body.foreground
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: "Names and jargon Whisper should expect, comma separated."
+        color: body.dim
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Row {
+        width: parent.width
+        spacing: Style.space(6)
+
+        TextField {
+          id: promptField
+          width: parent.width - parent.spacing - saveButton.implicitWidth
+          placeholderText: "Omarchy, Hyprland, Voxtype…"
+          foreground: body.foreground
+          enabled: !body.busy
+          onAccepted: body.savePrompt()
+        }
+
+        Button {
+          id: saveButton
+          anchors.verticalCenter: parent.verticalCenter
+          text: "Save"
+          bordered: true
+          foreground: body.foreground
+          fontFamily: body.fontFamily
+          enabled: !body.busy && promptField.text.trim() !== body.initialPrompt
+          onClicked: body.savePrompt()
+        }
       }
     }
   }
