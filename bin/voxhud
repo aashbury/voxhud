@@ -36,6 +36,9 @@ Usage: voxhud <command> [args]
   dictionary prompt [get|set <text>|clear]
                                   Vocabulary hints (whisper.initial_prompt)
   restart                         Restart the Voxtype daemon (dictionary changes need it)
+  setup                           Finish a marketplace install: turn Voxtype's own overlay
+                                  off, hide Omarchy's stock dictation icon, link this CLI
+                                  (the popup's "Finish setup" button runs the same thing)
   doctor                          Check the whole install
   uninstall                       Remove voxhud and restore what it changed
 
@@ -52,7 +55,7 @@ die()  { bad "$*" >&2; exit 1; }
 
 dictionary_json() {
   python3 - "$VOXTYPE_CONFIG" <<'PY'
-import json, sys, tomllib
+import json, shutil, sys, tomllib
 path = sys.argv[1]
 try:
     with open(path, "rb") as f:
@@ -64,6 +67,7 @@ except Exception as e:
     sys.exit(0)
 text = cfg.get("text", {}) if isinstance(cfg.get("text"), dict) else {}
 whisper = cfg.get("whisper", {}) if isinstance(cfg.get("whisper"), dict) else {}
+osd = cfg.get("osd", {}) if isinstance(cfg.get("osd"), dict) else {}
 reps = text.get("replacements", {})
 if not isinstance(reps, dict):
     reps = {}
@@ -76,6 +80,12 @@ print(json.dumps({
     "spoken_punctuation": bool(text.get("spoken_punctuation", False)),
     "filter_filler_words": bool(text.get("filter_filler_words", True)),
     "filler_words": [str(w) for w in fillers] if fillers is not None else None,
+    # What a marketplace install leaves undone. Voxtype shows its overlay
+    # unless osd.enabled is explicitly false, so an absent key means "on".
+    "setup": {
+        "voxtype_installed": shutil.which("voxtype") is not None,
+        "osd_enabled": osd.get("enabled", True) is not False,
+    },
 }))
 PY
 }
@@ -154,7 +164,7 @@ cmd_doctor() {
   if [[ $(shell_ipc voxhud ping 2>/dev/null) == "ok" ]]; then ok "voxhud service answering"; else bad "voxhud service not answering (journalctl --user -t omarchy-shell -n 50)"; fails=$((fails+1)); fi
 
   local osd; osd=$(voxtype config get osd.enabled 2>/dev/null | tr -d '[:space:]' | tail -c 5)
-  if [[ $osd == *false* ]]; then ok "voxtype's own OSD off"; else warn "voxtype's own OSD still on (two overlays) - voxtype config set osd.enabled false && voxhud restart"; fi
+  if [[ $osd == *false* ]]; then ok "voxtype's own OSD off"; else warn "voxtype's own OSD still on (two overlays) - click Finish setup in the popup, or: voxhud setup"; fi
 
   if [[ -f $SHELL_JSON ]]; then
     local items; items=$(jq -c '[.bar.layout[]?[]? | select(type=="object" and .id=="omarchy.indicators")][0].items // null' "$SHELL_JSON" 2>/dev/null)
@@ -166,7 +176,7 @@ cmd_doctor() {
     ok "dictation keys found - $(printf '%s' "$binds" | jq -r '[.start.label, .toggle.label] | map(select(. != null)) | join(", ")')"
   else warn "no dictation bindings discovered (legend will be generic)"; fi
 
-  if [[ -L "$HOME/.local/bin/voxhud" ]]; then ok "voxhud on PATH"; else warn "~/.local/bin/voxhud missing - run install.sh"; fi
+  if [[ -L "$HOME/.local/bin/voxhud" ]]; then ok "voxhud on PATH"; else warn "~/.local/bin/voxhud missing - click Finish setup in the popup, or run install.sh"; fi
 
   if (( fails == 0 )); then echo; echo "Ready. Hold F9 and talk. Try: voxhud demo tour"; else echo; echo "$fails check(s) failed."; fi
   return $fails
@@ -187,6 +197,7 @@ case "$cmd" in
               [[ $(shell_ipc voxhud copy "$((n - 1))") == "ok" ]] && ok "copied take $n" || die "no take $n" ;;
   dictionary|dict) cmd_dictionary "$@" ;;
   restart)    systemctl --user restart voxtype.service && ok "voxtype restarted" ;;
+  setup)      exec "$PLUGIN_DIR/install.sh" "$@" ;;
   doctor)     cmd_doctor ;;
   uninstall)  exec "$PLUGIN_DIR/uninstall.sh" "$@" ;;
   help|-h|--help) usage ;;

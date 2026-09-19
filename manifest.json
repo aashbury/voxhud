@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.aashbury.voxhud",
   "name": "Voxhud",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "aashbury",
   "license": "MIT",
   "description": "A minimalist, theme-aware HUD for Voxtype dictation: listening, processing, done - with the real keys to stop, a click to cancel, and your dictionary one click away in the bar.",

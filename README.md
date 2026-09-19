@@ -37,11 +37,15 @@ the bar icon:
 omarchy plugin add https://github.com/aashbury/voxhud.git --enable
 ```
 
-That gets you the HUD, the bar icon and the popup. Two things it deliberately
-does not do, because installing a plugin should not rewrite your config:
-turn Voxtype's own overlay off (otherwise you get two), and hide Omarchy's
-built-in dictation indicator (which disappears mid-transcription). A bundled
-script does both, and puts the `voxhud` CLI on your PATH:
+Then click the mic in the bar and press **Finish setup**. That is the whole
+install.
+
+Why the second step: installing a plugin should not rewrite your config, so
+`omarchy plugin add` deliberately leaves Voxtype's own overlay on (you would
+see two) and Omarchy's built-in dictation indicator in the bar (it disappears
+mid-transcription). The button makes those two changes with your say-so, and
+puts the `voxhud` CLI on your PATH. It runs the bundled script, which you can
+also run yourself:
 
 ```sh
 ~/.config/omarchy/plugins/io.github.aashbury.voxhud/install.sh

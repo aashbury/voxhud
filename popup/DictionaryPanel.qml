@@ -19,7 +19,16 @@ Column {
 
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property bool editing: fromField.activeFocus || toField.activeFocus || promptField.activeFocus
-  readonly property string cli: svc ? svc.cliPath : "voxhud"
+  // The CLI beside this file. A marketplace install has no `voxhud` on PATH
+  // until setup has run — a bare name fails exactly when the setup banner is
+  // needed — and the service only knows its own dir if the shell stamped the
+  // manifest it was given. Resolve from here; the service's answer is the
+  // fallback.
+  readonly property string localCli: {
+    var url = String(Qt.resolvedUrl("../bin/voxhud"))
+    return url.indexOf("file://") === 0 ? decodeURIComponent(url.substring(7)) : ""
+  }
+  readonly property string cli: localCli !== "" ? localCli : (svc ? svc.cliPath : "voxhud")
   readonly property string phase: svc ? svc.phase : "idle"
   readonly property string configPath: Quickshell.env("HOME") + "/.config/voxtype/config.toml"
   readonly property var builtinFillers: ["uh", "um", "er", "ah", "eh", "hmm", "hm", "mm", "mhm"]
@@ -33,6 +42,20 @@ Column {
   property bool busy: false
   property bool needsRestart: false
   property string error: ""
+
+  // `omarchy plugin add` never runs plugin code, so a marketplace install lands
+  // with Voxtype's own overlay still on: two overlays while you talk. The rest
+  // of the setup is install.sh, and the banner below runs it on a click so the
+  // config change is the user's decision, not the installer's. Keyed on the
+  // symptom they can see; nothing shows until the list has loaded, and an
+  // older CLI without the `setup` block simply never shows it.
+  property bool voxtypeInstalled: true
+  property bool osdEnabled: false
+  property bool settingUp: false
+  property bool setupFailed: false
+  property bool setupDone: false
+  readonly property bool setupPending: loaded && voxtypeInstalled && osdEnabled
+  readonly property string setupLog: Quickshell.env("HOME") + "/.local/state/voxhud/setup.log"
 
   // For the "2 min ago" labels; ticks only while the popup is open.
   property double nowMs: Date.now()
@@ -53,6 +76,32 @@ Column {
     interval: 1400
     repeat: false
     onTriggered: body.copiedIndex = -1
+  }
+
+  // Watches the config until install.sh has turned the overlay off. ~30 s is
+  // generous: the script restarts Voxtype and waits on the shell in between.
+  Timer {
+    id: setupPoll
+    property int attempts: 0
+    interval: 1500
+    repeat: true
+    onTriggered: {
+      attempts += 1
+      if (attempts > 20) {
+        stop()
+        body.settingUp = false
+        body.setupFailed = true
+        return
+      }
+      body.reload()
+    }
+  }
+
+  Timer {
+    id: setupDoneReset
+    interval: 8000
+    repeat: false
+    onTriggered: body.setupDone = false
   }
 
   function copyRecent(index) {
@@ -78,7 +127,31 @@ Column {
     fillerWords = Array.isArray(data.filler_words) ? data.filler_words : null
     spokenPunctuation = data.spoken_punctuation === true
     if (!promptField.activeFocus) promptField.text = initialPrompt
+    var setup = data.setup && typeof data.setup === "object" ? data.setup : {}
+    voxtypeInstalled = setup.voxtype_installed !== false
+    osdEnabled = setup.osd_enabled === true
     loaded = true
+    if (settingUp && !osdEnabled) {
+      settingUp = false
+      setupPoll.stop()
+      setupDone = true
+      setupDoneReset.restart()
+    }
+  }
+
+  function finishSetup() {
+    if (settingUp) return
+    error = ""
+    setupFailed = false
+    setupDone = false
+    settingUp = true
+    // Detached on purpose: hiding Omarchy's indicator edits shell.json, which
+    // reloads the bar and can take this popup down mid-run. The script has to
+    // outlive us, and its output goes to a log the failure text points at.
+    Quickshell.execDetached(["bash", "-c",
+      'mkdir -p "$(dirname "$1")" && exec "$0" setup > "$1" 2>&1', cli, setupLog])
+    setupPoll.attempts = 0
+    setupPoll.start()
   }
 
   function run(argv, onDone) {
@@ -200,6 +273,72 @@ Column {
     }
   }
 
+  // ---------------------------------------------------------------- setup
+  BorderSurface {
+    id: setupCard
+    visible: body.setupPending || body.settingUp || body.setupFailed
+    width: parent.width
+    implicitHeight: setupContent.implicitHeight + Style.spacing.huge
+    radius: Style.cornerRadius
+    color: Style.controlFill(false, false, body.foreground, Color.accent)
+    borderSpec: Border.controlSpec("selected", body.foreground, Color.accent)
+
+    Column {
+      id: setupContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: setupCard.borderLeft + Style.spacing.rowPaddingX
+      anchors.rightMargin: setupCard.borderRight + Style.spacing.rowPaddingX
+      spacing: Style.spacing.md
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: "One more step"
+        color: Color.accent
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: "Voxtype's own overlay is still on, so you see two while you talk. "
+          + "This turns it off, hides Omarchy's stock dictation icon (it disappears "
+          + "mid-transcription) and puts the voxhud command on your PATH. "
+          + "uninstall.sh puts all three back."
+        color: body.dim
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
+      Button {
+        text: body.settingUp ? "Setting up…" : "Finish setup"
+        bordered: true
+        foreground: Color.accent
+        fontFamily: body.fontFamily
+        fontSize: Style.font.bodySmall
+        enabled: !body.settingUp
+        onClicked: body.finishSetup()
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        visible: body.setupFailed
+        width: parent.width
+        text: "Setup didn't finish. Details are in ~/.local/state/voxhud/setup.log, "
+          + "or run install.sh from the plugin folder in a terminal."
+        color: Color.urgent
+        font.family: body.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+  }
+
   // Actions live up here so they never scroll out of reach.
   Row {
     width: parent.width
@@ -240,10 +379,12 @@ Column {
   Text {
     textFormat: Text.PlainText
     width: parent.width
-    text: body.needsRestart
-      ? "Voxtype reads its dictionary at start — restart it to use the changes."
-      : "HUD " + (body.svc && body.svc.hudEnabled ? "on" : "off") + " · ✕ on the HUD or middle-click the icon cancels a take"
-    color: body.needsRestart ? Color.accent : body.dim
+    text: body.setupDone
+      ? "Setup finished — Voxtype's overlay is off and it has been restarted."
+      : body.needsRestart
+        ? "Voxtype reads its dictionary at start — restart it to use the changes."
+        : "HUD " + (body.svc && body.svc.hudEnabled ? "on" : "off") + " · ✕ on the HUD or middle-click the icon cancels a take"
+    color: body.setupDone || body.needsRestart ? Color.accent : body.dim
     font.family: body.fontFamily
     font.pixelSize: Style.font.caption
     wrapMode: Text.WordWrap

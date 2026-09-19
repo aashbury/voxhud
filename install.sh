@@ -36,7 +36,7 @@ echo "Installing voxhud"
 echo
 
 # ---- preflight ---------------------------------------------------------------
-for tool in jq rsync python3; do
+for tool in jq python3; do
   command -v "$tool" >/dev/null || die "$tool not found"
 done
 command -v voxtype >/dev/null || warn "voxtype not installed - run: omarchy voxtype install (the HUD will wait for it)"
@@ -56,6 +56,9 @@ if [[ $REPO == "$TARGET" ]]; then
   chmod +x "$TARGET/bin/voxhud" "$TARGET/bin/voxhud-levels" "$TARGET/uninstall.sh"
   ok "running from the installed plugin"
 else
+  # rsync is only needed to copy a dev clone into place; a marketplace install
+  # (the branch above) must not fail for lack of it.
+  command -v rsync >/dev/null || die "rsync not found"
   # The shell reloads the plugin on every file event under its folder, so stage
   # the copy in a dot-directory (which the watcher ignores) and swap it in with
   # two renames: one reload instead of one per file.
